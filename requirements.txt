@@ -1,7 +1,8 @@
-streamlit
-pandas
-numpy
-matplotlib
-prophet
-statsmodels
-openpyxl
+streamlit # for creating the web application
+pandas # for data manipulation
+numpy # for numerical operations
+matplotlib # for plotting
+prophet # for time series forecasting
+statsmodels # for statistical modeling
+openpyxl # for reading Excel files
+seaborn # for data exploration
