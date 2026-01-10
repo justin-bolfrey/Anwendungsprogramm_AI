@@ -19,9 +19,18 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import streamlit as st
+import sys
+import os
+
+# --- PFAD-FIX (WICHTIG) ---
+# Das hier sorgt dafür, dass Python die Ordner findet, auch wenn VS Code sie weiß anzeigt
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
 from Part_justin.src import db_manager as db
 from Part_tobi import eda_analysis as eda
+from Part_Krisztian.model_prophet import backtest_holdout as prophet_backtest
 
 
 # -----------------------------
@@ -419,147 +428,111 @@ elif page == "3) Business KPIs":
         else:
             st.info("Wähle Einstellungen und klicke **KPIs berechnen**.")
 
-elif page == "4) Forecast + Backtest":
-    st.write("## Step 4: Forecast + Backtest ")
+elif page == "4) Forecast + Backtest": # Achte darauf, dass der Name exakt dem in der Sidebar entspricht!
+    st.write("## 🔮 AI Forecast + Backtest (Prophet)")
 
-    if not db_ready():
-        st.warning("Keine DB. Erst Import ausführen.")
-    else:
-        with st.form("forecast_form"):
-            model_label = st.selectbox("Forecast-Modell", ["Prophet", "SARIMAX"], index=0)
-            countries = cached_countries()
-            country_choice = st.selectbox("Land (optional)", ["(alle)"] + countries)
-            country = None if country_choice == "(alle)" else country_choice
+    # Lokale Konstanten (damit es nicht crasht, falls Tobi sie nicht hat)
+    WEEK_FREQ = "W-SUN"
+    YEARLY = True
 
-            horizon_weeks = st.slider("Prognose-Horizont (Wochen)", 4, 104, DEFAULT_HORIZON_WEEKS)
-            test_weeks = st.slider("Backtest (Holdout): letzte Wochen als Test", 4, 52, DEFAULT_TEST_WEEKS)
-
-            run_fc = st.form_submit_button("Forecast berechnen")
-
-        if run_fc:
-            ts = cached_weekly_revenue_sql(country=country)
-            if ts.empty or len(ts) < (test_weeks + 10):
-                st.warning("Zu wenige Daten für Forecast/Backtest. Bitte Filter lockern.")
-                st.stop()
-
-            ts = ts.sort_values("ds")
-            full_idx = pd.date_range(ts["ds"].min(), ts["ds"].max(), freq=WEEK_FREQ)
-            ts = ts.set_index("ds").reindex(full_idx)
-            ts.index.name = "ds"
-            ts["y"] = ts["y"].fillna(0.0)
-            ts = ts.reset_index()
-
-            train = ts.iloc[:-test_weeks].copy()
-            test = ts.iloc[-test_weeks:].copy()
-
-            st.write("### Historische Zeitreihe (Wochenumsatz)")
-            st.line_chart(ts.set_index("ds")["y"])
-
-            model_name = "prophet" if model_label.lower().startswith("prophet") else "sarimax"
-
-            if model_name == "prophet":
-                try:
-                    from prophet import Prophet
-                except Exception:
-                    Prophet = None
-
-                if Prophet is None:
-                    st.error("Prophet ist nicht installiert. Bitte `prophet` in requirements aufnehmen.")
-                else:
-                    seasonality_mode_val = "multiplicative" if st.checkbox("Multiplicative Seasonality", value=True) else "additive"
-                    cp_prior = st.slider("Changepoint Prior Scale", 0.001, 0.5, 0.05)
-                    seas_prior = st.slider("Seasonality Prior Scale", 0.01, 20.0, 10.0)
-
-                    df_train = train[["ds", "y"]].copy()
-                    m = Prophet(
-                        seasonality_mode=seasonality_mode_val,
-                        changepoint_prior_scale=cp_prior,
-                        seasonality_prior_scale=seas_prior,
-                        yearly_seasonality=True,
-                        weekly_seasonality=False,
-                        daily_seasonality=False,
-                    )
-                    m.fit(df_train)
-
-                    future = m.make_future_dataframe(periods=horizon_weeks, freq=WEEK_FREQ)
-                    fc = m.predict(future)
-
-                    fc_test = fc[fc["ds"].isin(test["ds"])][["ds", "yhat"]].merge(test, on="ds", how="inner")
-                    if not fc_test.empty:
-                        mae = (fc_test["y"] - fc_test["yhat"]).abs().mean()
-                        denom = fc_test["y"].replace(0, pd.NA)
-                        mape = ((fc_test["y"] - fc_test["yhat"]).abs() / denom).dropna().mean() * 100
-                        c1, c2 = st.columns(2)
-                        c1.metric("MAE (Holdout)", f"{mae:,.2f}")
-                        c2.metric("MAPE (Holdout)", f"{mape:,.2f}%")
-
-                    fig, ax = plt.subplots(figsize=(10, 4))
-                    ax.plot(ts["ds"], ts["y"], label="History")
-                    ax.plot(fc["ds"], fc["yhat"], label="Forecast")
-                    ax.fill_between(fc["ds"], fc["yhat_lower"], fc["yhat_upper"], alpha=0.2, label="Interval")
-                    ax.axvline(train["ds"].max(), linestyle="--", alpha=0.6, label="Train End")
-                    ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=10))
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-                    ax.tick_params(axis="x", labelrotation=45, labelsize=9)
-                    ax.tick_params(axis="y", labelsize=9)
-                    ax.set_title("Wochenumsatz – Prophet Forecast", fontsize=14)
-                    ax.legend()
-                    st.pyplot(fig)
-
-            else:
-                try:
-                    from statsmodels.tsa.statespace.sarimax import SARIMAX
-                except Exception:
-                    SARIMAX = None
-
-                if SARIMAX is None:
-                    st.error("statsmodels ist nicht installiert. Bitte `statsmodels` in requirements aufnehmen.")
-                else:
-                    order = st.text_input("SARIMAX order (p,d,q)", value="(1,1,1)")
-                    seasonal_order = st.text_input("SARIMAX seasonal_order (P,D,Q,s)", value="(0,1,1,52)")
-
-                    def parse_tuple(s: str):
-                        return tuple(int(x.strip()) for x in s.strip().strip("()").split(",") if x.strip() != "")
-
-                    try:
-                        order_t = parse_tuple(order)
-                        seas_t = parse_tuple(seasonal_order)
-                    except Exception:
-                        st.error("Bitte order/seasonal_order im Format (1,1,1) bzw. (0,1,1,52) eingeben.")
-                        st.stop()
-
-                    y_train = train.set_index("ds")["y"]
-                    y_test = test.set_index("ds")["y"]
-
-                    model = SARIMAX(y_train, order=order_t, seasonal_order=seas_t, enforce_stationarity=False, enforce_invertibility=False)
-                    res = model.fit(disp=False)
-
-                    pred_test = res.get_forecast(steps=len(y_test)).predicted_mean
-                    mae = (y_test - pred_test).abs().mean()
-                    denom = y_test.replace(0, pd.NA)
-                    mape = ((y_test - pred_test).abs() / denom).dropna().mean() * 100
-                    c1, c2 = st.columns(2)
-                    c1.metric("MAE (Holdout)", f"{mae:,.2f}")
-                    c2.metric("MAPE (Holdout)", f"{mape:,.2f}%")
-
-                    future_steps = horizon_weeks
-                    fc_mean = res.get_forecast(steps=future_steps).predicted_mean
-                    fc_index = pd.date_range(train["ds"].max() + pd.tseries.frequencies.to_offset(WEEK_FREQ), periods=future_steps, freq=WEEK_FREQ)
-
-                    fig, ax = plt.subplots(figsize=(10, 4))
-                    ax.plot(ts["ds"], ts["y"], label="History")
-                    ax.plot(y_test.index, pred_test.values, label="Backtest Forecast")
-                    ax.plot(fc_index, fc_mean.values, label="Future Forecast")
-                    ax.axvline(train["ds"].max(), linestyle="--", alpha=0.6, label="Train End")
-                    ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=10))
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-                    ax.tick_params(axis="x", labelrotation=45, labelsize=9)
-                    ax.tick_params(axis="y", labelsize=9)
-                    ax.set_title("Wochenumsatz – SARIMAX Forecast", fontsize=14)
-                    ax.legend()
-                    st.pyplot(fig)
+    # 1. DATEN LADEN & AGGREGIEREN
+    try:
+        # Rohdaten holen (Jede Zeile = 1 Transaktion)
+        df_raw = db.get_sales_data()
+        
+        if df_raw.empty:
+            st.warning("⚠️ Keine Daten in der Datenbank gefunden.")
         else:
-            st.info("Wähle Einstellungen und klicke **Forecast berechnen**.")
+            # Manuelle Aggregation: Von Rohdaten zu Wochen-Summen
+            # Das ist notwendig, weil Prophet eine Zeitreihe braucht (ds, y)
+            df_proc = df_raw.copy()
+            df_proc['invoice_date'] = pd.to_datetime(df_proc['invoice_date'])
+            
+            # Resample auf Wochen (Sonntag) und Umsatz summieren
+            df_sales = df_proc.set_index('invoice_date').resample(WEEK_FREQ)['umsatz'].sum().reset_index()
+            df_sales.columns = ['ds', 'y'] # Prophet-Konvention
+
+            # 2. GUI: EINSTELLUNGEN
+            col_info, col_conf = st.columns([1, 2])
+            with col_info:
+                st.info(f"**Datenbasis:**\n{len(df_sales)} Wochen aggregiert.")
+            
+            with col_conf:
+                horizon_weeks = st.slider("Forecast Horizont (Wochen)", 4, 104, 26)
+                test_weeks = st.slider("Backtest (Holdout)", 4, 52, 12, help="Wie viele Wochen sollen zum Testen abgeschnitten werden?")
+
+            # Erweiterte Parameter (im Expander versteckt für Clean Look)
+            with st.expander("⚙️ Modell-Parameter (Experten)"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    season_sel = st.selectbox("Saisonalität", ["Multiplikativ (Prozentual)", "Additiv (Absolut)"], index=0)
+                    seasonality_mode = "multiplicative" if "Multiplikativ" in season_sel else "additive"
+                with c2:
+                    cps = st.slider("Trend-Flexibilität", 0.01, 0.5, 0.05, help="Höher = Modell reagiert schneller auf Trendbrüche.")
+
+            # 3. BERECHNUNG STARTEN
+            st.markdown("---")
+            if st.button("🚀 Forecast berechnen", type="primary"):
+                with st.spinner("KI trainiert Modell & validiert..."):
+                    try:
+                        # Aufruf deiner Funktion aus model_prophet.py
+                        res = prophet_backtest(
+                            df=df_sales,
+                            test_weeks=int(test_weeks),
+                            horizon_weeks=int(horizon_weeks),
+                            week_freq=WEEK_FREQ,
+                            seasonality_mode=seasonality_mode,
+                            cps=float(cps),
+                            sps=3.0,
+                            yearly=YEARLY
+                        )
+
+                        # 4. ERGEBNISSE ANZEIGEN
+                        st.success("Berechnung erfolgreich abgeschlossen!")
+
+                        # Metriken (KPIs)
+                        kpi1, kpi2, kpi3 = st.columns(3)
+                        kpi1.metric("MAPE (Fehler)", f"{res.metrics['MAPE_%']:.1f} %", help="Mittlerer absoluter prozentualer Fehler")
+                        kpi2.metric("MAE (Absolut)", f"{res.metrics['MAE']:.0f} €", help="Mittlerer absoluter Fehler in Euro")
+                        kpi3.metric("RMSE", f"{res.metrics['RMSE']:.0f}")
+
+                        # Plotting (Matplotlib)
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        
+                        # A) Historie (Training) - Grau/Schwarz
+                        ax.plot(res.train_df["ds"], res.train_df["y"], label="Historie (Training)", color="#333333", alpha=0.4)
+                        
+                        # B) Realität (Holdout) - Rot gestrichelt
+                        ax.plot(res.test_df["ds"], res.test_df["y"], label="Realität (Holdout)", color="#d62728", linestyle="--", linewidth=2)
+                        
+                        # C) Forecast - Blau
+                        ax.plot(res.forecast["ds"], res.forecast["yhat"], label="KI Forecast", color="#1f77b4", linewidth=2)
+                        
+                        # D) Unsicherheit (Konfidenzintervall) - Blauer Schatten
+                        ax.fill_between(
+                            res.forecast["ds"], 
+                            res.forecast["yhat_lower"], 
+                            res.forecast["yhat_upper"], 
+                            alpha=0.15, color="#1f77b4", label="80% Konfidenz"
+                        )
+
+                        # E) Styling
+                        ax.set_title(f"Sales Forecast ({seasonality_mode})", fontsize=12)
+                        ax.set_ylabel("Umsatz (€)")
+                        ax.legend(loc="upper left")
+                        ax.grid(True, alpha=0.2)
+                        
+                        # Datumsformatierung der X-Achse
+                        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=10))
+                        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+                        
+                        st.pyplot(fig)
+
+                    except Exception as e:
+                        st.error(f"Fehler bei der Modell-Berechnung: {e}")
+
+    except Exception as e:
+        st.error(f"Fehler bei der Datenverarbeitung: {e}")
 
 elif page == "5) DB Overview":
     st.write("## Step 5: DB Overview ")
