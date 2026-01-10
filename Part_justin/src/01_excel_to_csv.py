@@ -9,7 +9,7 @@ PROCESSED_DIR = os.path.join(BASE_DIR, '..', 'data', 'processed')
 EXCEL_FILE = "online_retail_II.xlsx"
 
 def convert_excel():
-    print("⏳ START: Extrahiere Excel Sheets...")
+    print("START: Extrahiere Excel Sheets...")
     
     excel_path = os.path.join(RAW_DIR, EXCEL_FILE)
     
@@ -32,12 +32,12 @@ def convert_excel():
             
             # Speichern als CSV
             df.to_csv(output_path, index=False)
-            print(f"   ✅ Gespeichert als: {csv_name} ({len(df)} Zeilen)")
+            print(f"  Gespeichert als: {csv_name} ({len(df)} Zeilen)")
             
         except Exception as e:
-            print(f"   ❌ FEHLER bei {sheet_name}: {e}")
+            print(f"  FEHLER bei {sheet_name}: {e}")
 
-    print("🏁 FERTIG! Die CSV-Dateien liegen bereit.")
+    print("FERTIG! Die CSV-Dateien liegen bereit.")
 
 if __name__ == "__main__":
     convert_excel()

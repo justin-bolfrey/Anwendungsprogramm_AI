@@ -10,7 +10,7 @@ DB_PATH = os.path.join(BASE_DIR, '..', 'database', 'enterprise_data.db')
 CSV_FILES = ['sales_2009_2010.csv', 'sales_2010_2011.csv']
 
 def init_database():
-    print("🚀 START: Datenbank-Pipeline (aus CSV)...")
+    print(" START: Datenbank-Pipeline (aus CSV)...")
     
     # 1. Daten laden
     dfs = []
@@ -25,7 +25,7 @@ def init_database():
     print(f"   --> {len(df_all)} Zeilen geladen.")
 
     # 2. Bereinigung (Cleaning)
-    print("   🧹 Bereinige Daten...")
+    print("    Bereinige Daten...")
     
     # Spaltennamen säubern
     df_all.columns = df_all.columns.str.strip()
@@ -42,25 +42,25 @@ def init_database():
     # 3. Modellierung (Star Schema)
     
     # --- Dimension: Customers ---
-    print("   🔨 Baue Tabelle: customers")
+    print("    Baue Tabelle: customers")
     df_customers = df_all[['Customer ID', 'Country']].drop_duplicates()
     df_customers = df_customers.drop_duplicates(subset=['Customer ID'], keep='last')
     df_customers.columns = ['customer_id', 'country']
     
     # --- Dimension: Products ---
-    print("   🔨 Baue Tabelle: products")
+    print("    Baue Tabelle: products")
     df_products = df_all[['StockCode', 'Description']].drop_duplicates()
     df_products = df_products.drop_duplicates(subset=['StockCode'], keep='last')
     df_products.columns = ['stock_code', 'description']
     
     # --- Fakten: Sales ---
-    print("   🔨 Baue Tabelle: sales")
+    print("    Baue Tabelle: sales")
     # Wir speichern nur IDs und Fakten
     df_sales = df_all[['Invoice', 'StockCode', 'Quantity', 'InvoiceDate', 'Price', 'Customer ID']]
     df_sales.columns = ['invoice', 'stock_code', 'quantity', 'invoice_date', 'price', 'customer_id']
 
     # 4. Speichern (SQLite)
-    print(f"   💾 Speichere in DB: {DB_PATH}")
+    print(f"    Speichere in DB: {DB_PATH}")
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
     conn = sqlite3.connect(DB_PATH)
@@ -76,7 +76,7 @@ def init_database():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_prod ON sales(stock_code)")
     
     conn.close()
-    print("✅ FERTIG! Datenbank steht bereit.")
+    print(" FERTIG! Datenbank steht bereit.")
 
 if __name__ == "__main__":
     init_database()

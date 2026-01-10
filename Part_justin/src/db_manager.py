@@ -162,101 +162,137 @@ def get_dashboard_kpis(start_date=None, end_date=None, country=None):
     }
 
 # 2. Zeitreihe für Line-Charts (Umsatz pro Monat)
-def get_monthly_revenue(year=None):
-    """
-    Aggregiert den Umsatz pro Monat. Perfekt für Liniendiagramme.
-    """
+def get_monthly_revenue(year=None, country=None):
     conn = get_connection()
-    
+
     query = """
     SELECT 
-        strftime('%Y-%m', s.invoice_date) as monat,
-        SUM(s.quantity * s.price) as umsatz
+        strftime('%Y-%m', s.invoice_date) AS monat,
+        SUM(s.quantity * s.price) AS umsatz
     FROM sales s
+    JOIN customers c ON s.customer_id = c.customer_id
     WHERE s.quantity > 0
     """
-    
+
     params = []
+
     if year:
         query += " AND strftime('%Y', s.invoice_date) = ?"
         params.append(str(year))
-        
-    query += " GROUP BY strftime('%Y-%m', s.invoice_date) ORDER BY monat"
-    
+
+    if country:
+        query += " AND c.country = ?"
+        params.append(country)
+
+    query += " GROUP BY monat ORDER BY monat"
+
     df = pd.read_sql(query, conn, params=params)
     conn.close()
     return df
 
+
 # 3. Top Produkte (Was verkauft sich am besten?)
-def get_top_products(limit=10):
-    """
-    Zeigt die Bestseller nach Umsatz.
-    """
+def get_top_products(limit=10, country=None):
     conn = get_connection()
-    
+
     query = """
     SELECT 
         p.description,
-        SUM(s.quantity * s.price) as umsatz,
-        SUM(s.quantity) as verkaufte_menge
+        SUM(s.quantity * s.price) AS umsatz,
+        SUM(s.quantity) AS verkaufte_menge
     FROM sales s
     JOIN products p ON s.stock_code = p.stock_code
+    JOIN customers c ON s.customer_id = c.customer_id
     WHERE s.quantity > 0
+      AND p.description IS NOT NULL
+      AND TRIM(p.description) <> ''
+      AND LENGTH(TRIM(p.description)) >= 5
+      AND LOWER(TRIM(p.description)) NOT IN (
+          'damages','damaged','missing','manual','dotcom','check','?','none'
+      )
+    """
+
+    params = []
+
+    if country:
+        query += " AND c.country = ?"
+        params.append(country)
+
+    query += """
     GROUP BY p.description
     ORDER BY umsatz DESC
     LIMIT ?
     """
-    
-    df = pd.read_sql(query, conn, params=(limit,))
+
+    params.append(limit)
+
+    df = pd.read_sql(query, conn, params=params)
     conn.close()
     return df
+
+
 
 # 4. Hourly Sales (Wann kaufen die Leute? Morgens oder Abends?)
-def get_hourly_activity():
-
-    """
-    Analysiert, zu welcher Uhrzeit die meisten Bestellungen eingehen.
-    Gut für Heatmaps oder Balkendiagramme.
-    """
+def get_hourly_activity(country=None):
     conn = get_connection()
-    
+
     query = """
     SELECT 
-        strftime('%H', s.invoice_date) as stunde,
-        COUNT(DISTINCT s.invoice) as anzahl_bestellungen
+        strftime('%H', s.invoice_date) AS stunde,
+        COUNT(DISTINCT s.invoice) AS anzahl_bestellungen
     FROM sales s
+    JOIN customers c ON s.customer_id = c.customer_id
     WHERE s.quantity > 0
-    GROUP BY stunde
-    ORDER BY stunde
     """
-    
-    df = pd.read_sql(query, conn, params=[])
+
+    params = []
+
+    if country:
+        query += " AND c.country = ?"
+        params.append(country)
+
+    query += " GROUP BY stunde ORDER BY stunde"
+
+    df = pd.read_sql(query, conn, params=params)
     conn.close()
     return df
 
-def get_cancellations(limit=100):
+def get_cancellations(limit=100, country=None):
     """
-    Zeigt Stornos an (Menge < 0).
-    Wichtig für die Business-Analyse, um Rückgabegründe zu verstehen.
+    Zeigt Stornos an (quantity < 0), optional gefiltert nach Land.
     """
     conn = get_connection()
+
     query = """
     SELECT 
         s.invoice_date, 
         p.description, 
         s.quantity, 
         c.country,
-        (s.quantity * s.price) as erstattung
+        (s.quantity * s.price) AS erstattung
     FROM sales s
     JOIN products p ON s.stock_code = p.stock_code
     JOIN customers c ON s.customer_id = c.customer_id
     WHERE s.quantity < 0
-    ORDER BY s.invoice_date DESC 
+    """
+
+    params = []
+
+    if country:
+        query += " AND c.country = ?"
+        params.append(country)
+
+    query += """
+    ORDER BY s.invoice_date DESC
     LIMIT ?
     """
-    df = pd.read_sql(query, conn, params=(limit,))
+
+    params.append(limit)
+
+    df = pd.read_sql(query, conn, params=params)
     conn.close()
     return df
+
 
 def get_top_countries_by_revenue(top_n=10):
     """
@@ -278,6 +314,61 @@ def get_top_countries_by_revenue(top_n=10):
     conn.close()
     return df
 
+def get_db_status():
+    conn = get_connection()
+    df = pd.read_sql(""" 
+        SELECT
+            COUNT(*) AS sales_rows,
+            MIN(invoice_date) AS min_date,
+            MAX(invoice_date) AS max_date
+        FROM sales
+    """, conn)
+    conn.close()
+    if df.empty:
+        return {"sales_rows": 0, "min_date": None, "max_date": None}
+    return {
+        "sales_rows": int(df.loc[0, "sales_rows"]),
+        "min_date": df.loc[0, "min_date"],
+        "max_date": df.loc[0, "max_date"],
+    }
+
+   
+
+def get_weekly_revenue(start_date=None, end_date=None, country=None):
+    """
+    Sehr schnelle Wochen-Zeitreihe (ds,y) direkt aus SQL.
+    """
+    conn = get_connection()
+    query = """
+    SELECT
+        date(s.invoice_date, 'weekday 0') AS ds,   -- Wochenendtag (Sonntag) als Bucket
+        SUM(s.quantity * s.price) AS y
+    FROM sales s
+    JOIN customers c ON s.customer_id = c.customer_id
+    WHERE s.quantity > 0
+    """
+    params = []
+    if start_date:
+        query += " AND s.invoice_date >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND s.invoice_date <= ?"
+        params.append(end_date)
+    if country:
+        query += " AND c.country = ?"
+        params.append(country)
+
+    query += " GROUP BY date(s.invoice_date, 'weekday 0') ORDER BY ds"
+
+    df = pd.read_sql(query, conn, params=params)
+    conn.close()
+    if not df.empty:
+        df["ds"] = pd.to_datetime(df["ds"])
+        df["y"] = df["y"].astype(float)
+    return df
+
+
+
 # ==========================================
 # SYSTEM-CHECK (ENTRY POINT)
 # ==========================================
@@ -286,7 +377,7 @@ if __name__ == "__main__":
     pd.set_option('display.max_columns', None)
     pd.set_option('display.width', 1000)
     
-    print("\n🚀 STARTE SYSTEM-CHECK (Deine Version)...\n")
+    print("\n STARTE SYSTEM-CHECK (Deine Version)...\n")
 
     # --- BLOCK 1: Deine Basis-Funktionen ---
     print("--- 1. Basis-Listen (Deine Funktionen) ---")
