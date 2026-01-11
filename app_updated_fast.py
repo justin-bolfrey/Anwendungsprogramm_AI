@@ -266,17 +266,11 @@ elif page == "2) EDA":
                 monthly["umsatz_roll"] = (
                     monthly
                     .set_index("monat")["umsatz"]
-                    .rolling(window=roll_window)
+                    .rolling(window=3)
                     .mean()
                     .values
                     )
-                 # Slider für Rolling Window (EDA-Feature)
-                roll_window = st.slider(
-                    "Rolling Window (Monate)",
-                    min_value=2,
-                    max_value=12,
-                    value=3
-                    )
+                 
                 # Plot
                 st.line_chart(
                     monthly.set_index("monat")[["umsatz", "umsatz_roll"]]
