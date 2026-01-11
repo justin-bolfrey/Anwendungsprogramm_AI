@@ -185,45 +185,6 @@ def cached_weekly_revenue_sql(start_date=None, end_date=None, country=None) -> p
         df["y"] = df["y"].astype(float)
     return df
 
-@st.cache_data(ttl=300)
-def cached_revenue_sample_sql(country=None, limit=50000) -> pd.Series:
-    """Umsatz-Stichprobe für Histogramm/Outlier-Checks (statt alles zu laden)."""
-    if not db_ready():
-        return pd.Series(dtype=float)
-
-    conn = db.get_connection()
-    query = """
-    SELECT (s.quantity * s.price) AS umsatz
-    FROM sales s
-    JOIN customers c ON s.customer_id = c.customer_id
-    WHERE s.quantity > 0
-    """
-    params = []
-    if country:
-        query += " AND c.country = ?"
-        params.append(country)
-    query += " LIMIT ?"
-    params.append(int(limit))
-
-    df = pd.read_sql(query, conn, params=params)
-    conn.close()
-    if df.empty:
-        return pd.Series(dtype=float)
-    return df["umsatz"].astype(float)
-
-def iqr_outliers(values: pd.Series, k: float = 1.5) -> dict:
-    values = values.dropna()
-    if values.empty:
-        return {"q1": None, "q3": None, "iqr": None, "lower": None, "upper": None, "outlier_count": 0}
-    q1 = values.quantile(0.25)
-    q3 = values.quantile(0.75)
-    iqr = q3 - q1
-    lower = q1 - k * iqr
-    upper = q3 + k * iqr
-    outlier_count = int(((values < lower) | (values > upper)).sum())
-    return {"q1": float(q1), "q3": float(q3), "iqr": float(iqr), "lower": float(lower), "upper": float(upper), "outlier_count": outlier_count}
-
-
 # -----------------------------
 # Pages
 # -----------------------------
