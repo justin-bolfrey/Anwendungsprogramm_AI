@@ -2,16 +2,23 @@
 app_updated_fast.py
 -------------------
 
+📈 Online Retail II – Analytics & Forecast Dashboard
 
-Wichtig:
-- Keine großen Row-Level-Loads ohne Filter
+Ziel dieser Streamlit-App:
+- Ein vollständiges Mini-Dashboard (Import → Analyse → KPIs → Forecast → DB-Preview)
+- Klare UI-Flows (Forms/Buttons), damit nicht bei jeder kleinen Interaktion alles neu läuft
+
+Wichtig (Performance & UX):
+- Keine großen Row-Level-Loads ohne Filter (wo möglich aggregiert aus SQL laden)
 - Aggregationen direkt in SQL (kleine Resultsets)
-- Caching (st.cache_data) für DB-Abfragen
+- Caching (st.cache_data) für wiederkehrende DB-Abfragen
 - Forms + "Berechnen"-Buttons, damit Slider/Selectbox nicht ständig alles neu rechnen
 """
 
 from __future__ import annotations
 
+import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -19,11 +26,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import streamlit as st
-import sys
-import os
 
-# --- PFAD-FIX (WICHTIG) ---
-# Das hier sorgt dafür, dass Python die Ordner findet, auch wenn VS Code sie weiß anzeigt
+
+# -----------------------------
+# PFAD-FIX (wichtig für Imports)
+# -----------------------------
+# Sorgt dafür, dass Python Projekt-Module findet (z. B. wenn VS Code Ordner "weiß" anzeigt).
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
@@ -36,7 +44,11 @@ from Part_Krisztian.model_prophet import backtest_holdout as prophet_backtest
 # -----------------------------
 # Streamlit Config
 # -----------------------------
-st.set_page_config(page_title="Online Retail II – Forecast Cockpit ", layout="wide", page_icon="🛒")
+st.set_page_config(
+    page_title="Online Retail II – Analytics & Forecast Dashboard",
+    layout="wide",
+    page_icon="📈",
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RAW_DIR = PROJECT_ROOT / "Part_justin" / "data" / "raw"
@@ -55,24 +67,22 @@ DEFAULT_TEST_WEEKS = 12
 
 
 # -----------------------------
-# Navigation
+# Navigation (Tabs statt Sidebar)
 # -----------------------------
-st.sidebar.title("Navigation")
-page = st.sidebar.radio(
-    "Bereich wählen",
-    ["1) Import", "2) EDA", "3) Business KPIs", "4) Forecast + Backtest", "5) DB Overview"],
-    index=0,
-)
+st.write("# 📈 Online Retail II – Analytics & Forecast Dashboard")
 
-st.write("# 🛒 Online Retail II – Forecast Cockpit ")
-st.caption(f"DB-Datei: {DB_FILE}")
+tab_import, tab_eda, tab_kpis, tab_forecast, tab_db = st.tabs(
+    ["1) Import", "2) EDA", "3) Business KPIs", "4) Prophet Forecast", "5) DB Overview"]
+)
 
 
 # -----------------------------
 # Helpers (fast + cached)
 # -----------------------------
 def db_ready() -> bool:
+    """True, wenn die SQLite DB-Datei existiert."""
     return DB_FILE.exists()
+
 
 def ensure_uploaded_excel(uploaded_file) -> Path:
     """Speichert Upload unter dem erwarteten Namen."""
@@ -81,7 +91,9 @@ def ensure_uploaded_excel(uploaded_file) -> Path:
         f.write(uploaded_file.getbuffer())
     return target
 
+
 def safe_run(cmd: list[str]) -> tuple[bool, str]:
+    """Startet ein Script per subprocess und gibt (ok, output) zurück."""
     try:
         res = subprocess.run(cmd, check=True, capture_output=True, text=True)
         out = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
@@ -90,11 +102,13 @@ def safe_run(cmd: list[str]) -> tuple[bool, str]:
         out = (e.stdout or "") + ("\n" + e.stderr if e.stderr else "")
         return False, out.strip()
 
+
 @st.cache_data(ttl=300)
 def cached_db_status() -> dict:
     """Sehr schneller DB-Status ohne große Joins."""
     if not db_ready():
         return {"sales_rows": 0, "min_date": None, "max_date": None}
+
     conn = db.get_connection()
     df = pd.read_sql(
         """
@@ -106,29 +120,42 @@ def cached_db_status() -> dict:
         conn,
     )
     conn.close()
+
     if df.empty:
         return {"sales_rows": 0, "min_date": None, "max_date": None}
+
     return {
         "sales_rows": int(df.loc[0, "sales_rows"]),
         "min_date": df.loc[0, "min_date"],
         "max_date": df.loc[0, "max_date"],
     }
 
+
 @st.cache_data(ttl=300)
 def cached_countries() -> list[str]:
+    """Liste aller Länder (für Filter)."""
     if not db_ready():
         return []
     return db.get_all_countries()
 
+
 @st.cache_data(ttl=300)
 def cached_dashboard_kpis(start_date=None, end_date=None, country=None) -> dict:
+    """Kompakte KPI-Aggregationen aus der DB-Schicht."""
     if not db_ready():
         return {"revenue": 0, "orders": 0, "customers": 0, "aov": 0}
     return db.get_dashboard_kpis(start_date=start_date, end_date=end_date, country=country)
 
+
 @st.cache_data(ttl=300)
-def cached_monthly_revenue(year=None, country=None):
-    return eda.monthly_revenue(year=year, country=country)
+def cached_monthly_revenue(year=None, country=None) -> pd.DataFrame:
+    """
+    Monatsumsatz aus der DB-Schicht (robust, unabhängig von Team-Versionen im EDA-Modul).
+    Erwartete Spalten: monat (YYYY-MM), umsatz
+    """
+    if not db_ready():
+        return pd.DataFrame()
+    return db.get_monthly_revenue(year=year, country=country)
 
 
 @st.cache_data(ttl=300)
@@ -137,11 +164,13 @@ def cached_top_products(limit=10, country=None) -> pd.DataFrame:
         return pd.DataFrame()
     return db.get_top_products(limit=limit, country=country)
 
+
 @st.cache_data(ttl=300)
 def cached_top_countries(limit=10) -> pd.DataFrame:
     if not db_ready():
         return pd.DataFrame()
     return db.get_top_countries_by_revenue(top_n=limit)
+
 
 @st.cache_data(ttl=300)
 def cached_hourly_activity(country=None) -> pd.DataFrame:
@@ -149,20 +178,62 @@ def cached_hourly_activity(country=None) -> pd.DataFrame:
         return pd.DataFrame()
     return db.get_hourly_activity(country=country)
 
+
 @st.cache_data(ttl=300)
-def cached_weekly_revenue(start_date=None, end_date=None, country=None):
-    return eda.weekly_revenue(start_date=start_date, end_date=end_date, country=country)
+def cached_weekly_revenue_sql(start_date=None, end_date=None, country=None) -> pd.DataFrame:
+    """
+    Wochenumsatz direkt in SQL aggregieren (schnell, kleines Resultset).
+    Output: ds (datetime), y (float)
+    """
+    if not db_ready():
+        return pd.DataFrame(columns=["ds", "y"])
+
+    conn = db.get_connection()
+    query = """
+    SELECT
+        date(s.invoice_date, 'weekday 0') AS ds,
+        SUM(s.quantity * s.price) AS y
+    FROM sales s
+    JOIN customers c ON s.customer_id = c.customer_id
+    WHERE s.quantity > 0
+    """
+    params: list = []
+
+    if start_date:
+        query += " AND s.invoice_date >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND s.invoice_date <= ?"
+        params.append(end_date)
+    if country:
+        query += " AND c.country = ?"
+        params.append(country)
+
+    query += " GROUP BY date(s.invoice_date, 'weekday 0') ORDER BY ds"
+    df = pd.read_sql(query, conn, params=params)
+    conn.close()
+
+    if not df.empty:
+        df["ds"] = pd.to_datetime(df["ds"])
+        df["y"] = df["y"].astype(float)
+    return df
+
 
 # -----------------------------
 # Pages
 # -----------------------------
-if page == "1) Import":
-    st.write("## Step 1: Import Excel → CSV → SQLite ")
+with tab_import:
+    st.write("## Import: Excel → CSV → SQLite")
 
     col_a, col_b = st.columns([2, 1], vertical_alignment="top")
 
     with col_a:
-        up = st.file_uploader("online_retail_II.xlsx hochladen", type=["xlsx"])
+        # key gesetzt, damit Streamlit garantiert keine Duplicate-IDs meldet
+        up = st.file_uploader(
+            "online_retail_II.xlsx hochladen",
+            type=["xlsx"],
+            key="import_uploader",
+        )
 
         st.write("### Status")
         if db_ready():
@@ -172,7 +243,7 @@ if page == "1) Import":
 
         if db_ready():
             status = cached_db_status()
-            if status["sales_rows"] > 0:
+            if status["sales_rows"] > 0 and status["min_date"] and status["max_date"]:
                 st.info(
                     f"Sales-Zeilen: {status['sales_rows']:,} | "
                     f"{pd.to_datetime(status['min_date']).date()} bis {pd.to_datetime(status['max_date']).date()}"
@@ -181,11 +252,13 @@ if page == "1) Import":
         st.write("### Pipeline ausführen")
         st.caption("Ablauf: Upload → raw/online_retail_II.xlsx → 01_excel_to_csv.py → 02_init_db.py")
 
+        # Upload speichern (nur, wenn wirklich hochgeladen wurde)
         if up is not None:
             saved = ensure_uploaded_excel(up)
             st.success(f"Upload gespeichert: {saved}")
 
-        if st.button("🚀 Pipeline starten", disabled=(up is None)):
+        # Pipeline bewusst nur auf Button-Klick starten (wichtig wegen Streamlit-Reruns)
+        if st.button("🚀 Pipeline starten", disabled=(up is None), key="btn_pipeline"):
             st.cache_data.clear()  # nach Neuaufbau Cache leeren
             st.info("Starte Schritt 1: Excel → CSV …")
             ok1, out1 = safe_run(["python", str(PIPELINE_EXCEL)])
@@ -201,31 +274,33 @@ if page == "1) Import":
                 else:
                     st.error("Schritt 2 fehlgeschlagen oder DB wurde nicht erstellt.")
 
-    with col_b:
-        st.markdown(
-            """**Performance-Hinweis**
-- Keine vollständigen Join-Loads mehr automatisch.
-- EDA/KPIs nutzen SQL-Aggregationen + Caching + Buttons.
-"""
-        )
 
-elif page == "2) EDA":
-    st.write("## Step 2: EDA")
+with tab_eda:
+    st.write("## EDA - Explorative Datenalyse")
 
     if not db_ready():
         st.warning("Keine DB. Erst Import ausführen.")
     else:
+        # Form: verhindert, dass jede Widget-Änderung sofort alles neu berechnet
         with st.form("eda_form"):
             countries = cached_countries()
-            country_choice = st.selectbox("Land (optional)", ["(alle)"] + countries)
+            country_choice = st.selectbox(
+                "Land (optional)",
+                ["(alle)"] + countries,
+                key="eda_country",
+            )
             country = None if country_choice == "(alle)" else country_choice
 
-            
-            roll_window = st.slider("Rolling Window (Wochen)", 2, 12, 4)
+            roll_window = st.slider(
+                "Rolling Window (Wochen)",
+                2, 12, 4,
+                key="eda_roll_window",
+            )
 
             run_eda = st.form_submit_button("EDA berechnen")
 
         if run_eda:
+            # KPI-Quick-Row
             kpis = cached_dashboard_kpis(country=country)
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Umsatz", f"{kpis['revenue']:,.0f}")
@@ -235,51 +310,50 @@ elif page == "2) EDA":
 
             st.divider()
 
+            # Wochenumsatz
             st.write("### Wochenumsatz (Zeitreihe)")
-            ts = cached_weekly_revenue(country=country)
+            ts = cached_weekly_revenue_sql(country=country)
             if ts.empty:
                 st.warning("Keine Daten für die Auswahl.")
             else:
                 st.line_chart(ts.set_index("ds")["y"])
                 st.write("Deskriptive Statistik (Wochenumsatz)")
-                st.dataframe(ts[["y"]].describe().T, use_container_width=True)
+                st.dataframe(ts[["y"]].describe().T, width="stretch")
 
-                ts_roll = eda.rolling_average(ts.rename(columns={"ds": "ds", "y": "y"}), window=roll_window)
+                # Rolling Average (Logik aus EDA-Modul)
+                ts_roll = eda.rolling_average(ts[["ds", "y"]], window=roll_window)
                 st.write("### Glättung (Rolling Average)")
                 st.line_chart(ts_roll.set_index("ds")[["y", "y_roll"]])
 
             st.divider()
-    
-            st.write("### Umsatz pro Monat (mit Rolling Average)")
 
+            # Monatsumsatz
+            st.write("### Umsatz pro Monat (mit Rolling Average)")
             monthly = cached_monthly_revenue(country=country)
 
             if monthly.empty:
                 st.info("Keine Monatsdaten verfügbar.")
             else:
-            # Monat in echtes Datum umwandeln
+                monthly = monthly.copy()
+                # Monat in echtes Datum umwandeln (für Chart)
                 monthly["monat"] = pd.to_datetime(monthly["monat"] + "-01")
-
-
-            # Rolling Average berechnen
                 monthly = monthly.sort_values("monat")
+
                 monthly["umsatz_roll"] = (
-                    monthly
-                    .set_index("monat")["umsatz"]
-                    .rolling(window=3)
+                    monthly.set_index("monat")["umsatz"]
+                    .rolling(window=roll_window)
                     .mean()
                     .values
-                    )
-                 
-                # Plot
-                st.line_chart(
-                    monthly.set_index("monat")[["umsatz", "umsatz_roll"]]
-                    )
-                st.write("### Deskriptive Statistik (Monatsumsatz)")
-                st.dataframe(monthly[["umsatz"]].describe().T, use_container_width=True)
-            st.divider()
-            st.write("### Umsatz nach Wochentag")
+                )
 
+                st.line_chart(monthly.set_index("monat")[["umsatz", "umsatz_roll"]])
+                st.write("Deskriptive Statistik (Monatsumsatz)")
+                st.dataframe(monthly[["umsatz"]].describe().T, width="stretch")
+
+            st.divider()
+
+            # Umsatz nach Wochentag
+            st.write("### Umsatz nach Wochentag")
             weekday = eda.weekday_profile(country=country)
             if weekday.empty:
                 st.info("Keine Daten für Wochentage.")
@@ -287,37 +361,45 @@ elif page == "2) EDA":
                 # optional: deutsche Labels
                 mapping = {
                     "Monday": "Mo", "Tuesday": "Di", "Wednesday": "Mi",
-                    "Thursday": "Do", "Friday": "Fr", "Saturday": "Sa", "Sunday": "So"
+                    "Thursday": "Do", "Friday": "Fr", "Saturday": "Sa", "Sunday": "So",
                 }
                 w = weekday.copy()
                 w["weekday"] = w["weekday"].astype(str).map(lambda x: mapping.get(x, x))
                 order = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
                 w["weekday"] = pd.Categorical(w["weekday"], categories=order, ordered=True)
                 w = w.sort_values("weekday")
+
                 st.bar_chart(w.set_index("weekday")["revenue"])
-                st.dataframe(weekday, use_container_width=True)
+                st.dataframe(weekday, width="stretch")
+
+            # Optionaler Detailblock
             with st.expander("Retouren/Stornos – Preview"):
                 ret = eda.returns_summary(limit_preview=50)
                 st.metric("Anzahl Retouren (Preview)", ret["count_returns"])
                 st.metric("Erstattungsbetrag (Preview, absolut)", f"{ret['refund_total']:,.2f}")
-                st.dataframe(ret["preview_df"], use_container_width=True) 
+                st.dataframe(ret["preview_df"], width="stretch")
 
         else:
             st.info("Wähle Einstellungen und klicke **EDA berechnen**.")
 
-elif page == "3) Business KPIs":
-    st.write("## Step 3: Business KPIs ")
+
+with tab_kpis:
+    st.write("## Business KPIs")
 
     if not db_ready():
         st.warning("Keine DB. Erst Import ausführen.")
     else:
         with st.form("kpi_form"):
             countries = cached_countries()
-            country_choice = st.selectbox("Land (optional)", ["(alle)"] + countries)
+            country_choice = st.selectbox(
+                "Land (optional)",
+                ["(alle)"] + countries,
+                key="kpi_country",
+            )
             country = None if country_choice == "(alle)" else country_choice
 
-            top_n_products = st.slider("Top-Produkte", 5, 50, 10)
-            top_n_countries = st.slider("Top-Länder", 5, 30, 10)
+            top_n_products = st.slider("Top-Produkte", 5, 50, 10, key="kpi_top_products")
+            top_n_countries = st.slider("Top-Länder", 5, 30, 10, key="kpi_top_countries")
 
             run_kpis = st.form_submit_button("KPIs berechnen")
 
@@ -329,13 +411,19 @@ elif page == "3) Business KPIs":
             c3.metric("Aktive Kunden", f"{kpis['customers']:,.0f}")
             c4.metric("Ø Wert (AOV)", f"{kpis['aov']:,.2f}")
 
-            st.write("---")
+            st.divider()
 
             st.write("### Top Produkte (nach Umsatz)")
-            st.dataframe(cached_top_products(limit=top_n_products, country=country), use_container_width=True)
+            st.dataframe(
+                cached_top_products(limit=top_n_products, country=country),
+                width="stretch",
+            )
 
             st.write("### Top Länder (nach Umsatz)")
-            st.dataframe(cached_top_countries(limit=top_n_countries), use_container_width=True)
+            st.dataframe(
+                cached_top_countries(limit=top_n_countries),
+                width="stretch",
+            )
 
             st.write("### Bestellungen nach Uhrzeit")
             hourly = cached_hourly_activity(country=country)
@@ -347,133 +435,128 @@ elif page == "3) Business KPIs":
             else:
                 st.info("Keine Hourly-Daten verfügbar.")
 
-                  
         else:
             st.info("Wähle Einstellungen und klicke **KPIs berechnen**.")
 
-elif page == "4) Forecast + Backtest": # Achte darauf, dass der Name exakt dem in der Sidebar entspricht!
-    st.write("## 🔮 AI Forecast + Backtest (Prophet)")
 
-    # Lokale Konstanten (damit es nicht crasht, falls Tobi sie nicht hat)
-    WEEK_FREQ = "W-SUN"
-    YEARLY = True
+with tab_forecast:
+    st.write("## 🔮 Prophet Forecast")
 
-    # 1. DATEN LADEN & AGGREGIEREN
-    try:
-        # Rohdaten holen (Jede Zeile = 1 Transaktion)
-        df_raw = db.get_sales_data()
-        
-        if df_raw.empty:
-            st.warning("⚠️ Keine Daten in der Datenbank gefunden.")
+    if not db_ready():
+        st.warning("Keine DB. Erst Import ausführen.")
+    else:
+        # Für Prophet brauchen wir ds/y. Wir holen Wochenumsatz direkt aus SQL (klein + schnell).
+        df_sales = cached_weekly_revenue_sql()
+
+        if df_sales.empty:
+            st.warning("⚠️ Keine Wochenumsatz-Daten verfügbar.")
         else:
-            # Manuelle Aggregation: Von Rohdaten zu Wochen-Summen
-            # Das ist notwendig, weil Prophet eine Zeitreihe braucht (ds, y)
-            df_proc = df_raw.copy()
-            df_proc['invoice_date'] = pd.to_datetime(df_proc['invoice_date'])
-            
-            # Resample auf Wochen (Sonntag) und Umsatz summieren
-            df_sales = df_proc.set_index('invoice_date').resample(WEEK_FREQ)['umsatz'].sum().reset_index()
-            df_sales.columns = ['ds', 'y'] # Prophet-Konvention
-
-            # 2. GUI: EINSTELLUNGEN
-            col_info, col_conf = st.columns([1, 2])
+            col_info, col_conf = st.columns([1, 2], vertical_alignment="center")
             with col_info:
-                st.info(f"**Datenbasis:**\n{len(df_sales)} Wochen aggregiert.")
-            
-            with col_conf:
-                horizon_weeks = st.slider("Forecast Horizont (Wochen)", 4, 104, 26)
-                test_weeks = st.slider("Backtest (Holdout)", 4, 52, 12, help="Wie viele Wochen sollen zum Testen abgeschnitten werden?")
+                st.info(f"**Datenbasis:** {len(df_sales)} Wochen aggregiert.")
 
-            # Erweiterte Parameter (im Expander versteckt für Clean Look)
+            with col_conf:
+                horizon_weeks = st.slider(
+                    "Forecast Horizont (Wochen)",
+                    4, 104, DEFAULT_HORIZON_WEEKS,
+                    key="fc_horizon",
+                )
+                test_weeks = st.slider(
+                    "Backtest (Holdout)",
+                    4, 52, DEFAULT_TEST_WEEKS,
+                    help="Wie viele Wochen werden zum Testen vom Ende abgeschnitten?",
+                    key="fc_test",
+                )
+
             with st.expander("⚙️ Modell-Parameter (Experten)"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    season_sel = st.selectbox("Saisonalität", ["Multiplikativ (Prozentual)", "Additiv (Absolut)"], index=0)
+                    season_sel = st.selectbox(
+                        "Saisonalität",
+                        ["Multiplikativ (Prozentual)", "Additiv (Absolut)"],
+                        index=0,
+                        key="fc_seasonality",
+                    )
                     seasonality_mode = "multiplicative" if "Multiplikativ" in season_sel else "additive"
                 with c2:
-                    cps = st.slider("Trend-Flexibilität", 0.01, 0.5, 0.05, help="Höher = Modell reagiert schneller auf Trendbrüche.")
+                    cps = st.slider(
+                        "Trend-Flexibilität",
+                        0.01, 0.5, 0.05,
+                        help="Höher = Modell reagiert schneller auf Trendbrüche.",
+                        key="fc_cps",
+                    )
 
-            # 3. BERECHNUNG STARTEN
-            st.markdown("---")
-            if st.button("🚀 Forecast berechnen", type="primary"):
-                with st.spinner("KI trainiert Modell & validiert..."):
+            st.divider()
+
+            # Button: Modell läuft nur auf expliziten Klick (sonst nervige Reruns)
+            if st.button("🚀 Forecast berechnen", type="primary", key="btn_forecast"):
+                with st.spinner("Modell wird trainiert & validiert ..."):
                     try:
-                        # Aufruf deiner Funktion aus model_prophet.py
                         res = prophet_backtest(
-                            df=df_sales,
+                            df=df_sales[["ds", "y"]],
                             test_weeks=int(test_weeks),
                             horizon_weeks=int(horizon_weeks),
                             week_freq=WEEK_FREQ,
                             seasonality_mode=seasonality_mode,
                             cps=float(cps),
                             sps=3.0,
-                            yearly=YEARLY
+                            yearly=True,
                         )
 
-                        # 4. ERGEBNISSE ANZEIGEN
                         st.success("Berechnung erfolgreich abgeschlossen!")
 
-                        # Metriken (KPIs)
                         kpi1, kpi2, kpi3 = st.columns(3)
-                        kpi1.metric("MAPE (Fehler)", f"{res.metrics['MAPE_%']:.1f} %", help="Mittlerer absoluter prozentualer Fehler")
-                        kpi2.metric("MAE (Absolut)", f"{res.metrics['MAE']:.0f} €", help="Mittlerer absoluter Fehler in Euro")
+                        kpi1.metric("MAPE", f"{res.metrics['MAPE_%']:.1f} %")
+                        kpi2.metric("MAE", f"{res.metrics['MAE']:.0f} €")
                         kpi3.metric("RMSE", f"{res.metrics['RMSE']:.0f}")
 
-                        # Plotting (Matplotlib)
                         fig, ax = plt.subplots(figsize=(10, 5))
-                        
-                        # A) Historie (Training) - Grau/Schwarz
-                        ax.plot(res.train_df["ds"], res.train_df["y"], label="Historie (Training)", color="#333333", alpha=0.4)
-                        
-                        # B) Realität (Holdout) - Rot gestrichelt
-                        ax.plot(res.test_df["ds"], res.test_df["y"], label="Realität (Holdout)", color="#d62728", linestyle="--", linewidth=2)
-                        
-                        # C) Forecast - Blau
-                        ax.plot(res.forecast["ds"], res.forecast["yhat"], label="KI Forecast", color="#1f77b4", linewidth=2)
-                        
-                        # D) Unsicherheit (Konfidenzintervall) - Blauer Schatten
+
+                        ax.plot(res.train_df["ds"], res.train_df["y"], label="Historie (Training)", alpha=0.4)
+                        ax.plot(res.test_df["ds"], res.test_df["y"], label="Realität (Holdout)", linestyle="--", linewidth=2)
+                        ax.plot(res.forecast["ds"], res.forecast["yhat"], label="KI Forecast", linewidth=2)
                         ax.fill_between(
-                            res.forecast["ds"], 
-                            res.forecast["yhat_lower"], 
-                            res.forecast["yhat_upper"], 
-                            alpha=0.15, color="#1f77b4", label="80% Konfidenz"
+                            res.forecast["ds"],
+                            res.forecast["yhat_lower"],
+                            res.forecast["yhat_upper"],
+                            alpha=0.15,
+                            label="80% Konfidenz",
                         )
 
-                        # E) Styling
                         ax.set_title(f"Sales Forecast ({seasonality_mode})", fontsize=12)
                         ax.set_ylabel("Umsatz (€)")
                         ax.legend(loc="upper left")
                         ax.grid(True, alpha=0.2)
-                        
-                        # Datumsformatierung der X-Achse
+
                         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=10))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-                        
+
                         st.pyplot(fig)
 
                     except Exception as e:
                         st.error(f"Fehler bei der Modell-Berechnung: {e}")
 
-    except Exception as e:
-        st.error(f"Fehler bei der Datenverarbeitung: {e}")
 
-elif page == "5) DB Overview":
-    st.write("## Step 5: DB Overview ")
+with tab_db:
+    st.write("## DB Overview")
 
     if not db_ready():
         st.warning("Keine DB. Erst Import ausführen.")
     else:
         st.success("DB gefunden ✅")
+
         conn = db.get_connection()
         tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;", conn)
         conn.close()
 
         st.write("### Tabellen")
-        st.dataframe(tables, use_container_width=True)
+        st.dataframe(tables, width="stretch")
 
+        # Preview pro Tabelle (max 50 Zeilen)
         for t in tables["name"].tolist():
             with st.expander(f"Preview: {t}"):
                 conn = db.get_connection()
                 df = pd.read_sql(f"SELECT * FROM {t} LIMIT 50;", conn)
                 conn.close()
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width="stretch")
+
