@@ -127,10 +127,9 @@ def cached_dashboard_kpis(start_date=None, end_date=None, country=None) -> dict:
     return db.get_dashboard_kpis(start_date=start_date, end_date=end_date, country=country)
 
 @st.cache_data(ttl=300)
-def cached_monthly_revenue(year=None, country=None) -> pd.DataFrame:
-    if not db_ready():
-        return pd.DataFrame()
-    return db.get_monthly_revenue(year=year, country=country)
+def cached_monthly_revenue(year=None, country=None):
+    return eda.monthly_revenue(year=year, country=country)
+
 
 @st.cache_data(ttl=300)
 def cached_top_products(limit=10, country=None) -> pd.DataFrame:
@@ -151,39 +150,8 @@ def cached_hourly_activity(country=None) -> pd.DataFrame:
     return db.get_hourly_activity(country=country)
 
 @st.cache_data(ttl=300)
-def cached_weekly_revenue_sql(start_date=None, end_date=None, country=None) -> pd.DataFrame:
-    """Wochenumsatz direkt in SQL aggregieren (sehr schnell)."""
-    if not db_ready():
-        return pd.DataFrame(columns=["ds", "y"])
-
-    conn = db.get_connection()
-    query = """
-    SELECT
-        date(s.invoice_date, 'weekday 0') AS ds,
-        SUM(s.quantity * s.price) AS y
-    FROM sales s
-    JOIN customers c ON s.customer_id = c.customer_id
-    WHERE s.quantity > 0
-    """
-    params = []
-    if start_date:
-        query += " AND s.invoice_date >= ?"
-        params.append(start_date)
-    if end_date:
-        query += " AND s.invoice_date <= ?"
-        params.append(end_date)
-    if country:
-        query += " AND c.country = ?"
-        params.append(country)
-
-    query += " GROUP BY date(s.invoice_date, 'weekday 0') ORDER BY ds"
-    df = pd.read_sql(query, conn, params=params)
-    conn.close()
-
-    if not df.empty:
-        df["ds"] = pd.to_datetime(df["ds"])
-        df["y"] = df["y"].astype(float)
-    return df
+def cached_weekly_revenue(start_date=None, end_date=None, country=None):
+    return eda.weekly_revenue(start_date=start_date, end_date=end_date, country=country)
 
 # -----------------------------
 # Pages
@@ -268,7 +236,7 @@ elif page == "2) EDA":
             st.divider()
 
             st.write("### Wochenumsatz (Zeitreihe)")
-            ts = cached_weekly_revenue_sql(country=country)
+            ts = cached_weekly_revenue(country=country)
             if ts.empty:
                 st.warning("Keine Daten für die Auswahl.")
             else:
@@ -334,7 +302,11 @@ elif page == "2) EDA":
                 w = w.sort_values("weekday")
                 st.bar_chart(w.set_index("weekday")["revenue"])
                 st.dataframe(weekday, use_container_width=True)
-
+            with st.expander("Retouren/Stornos – Preview"):
+                ret = eda.returns_summary(limit_preview=50)
+                st.metric("Anzahl Retouren (Preview)", ret["count_returns"])
+                st.metric("Erstattungsbetrag (Preview, absolut)", f"{ret['refund_total']:,.2f}")
+                st.dataframe(ret["preview_df"], use_container_width=True) 
 
         else:
             st.info("Wähle Einstellungen und klicke **EDA berechnen**.")
@@ -381,11 +353,7 @@ elif page == "3) Business KPIs":
             else:
                 st.info("Keine Hourly-Daten verfügbar.")
 
-            with st.expander("Retouren/Stornos – Preview"):
-                ret = eda.returns_summary(limit_preview=50)
-                st.metric("Anzahl Retouren (Preview)", ret["count_returns"])
-                st.metric("Erstattungsbetrag (Preview, absolut)", f"{ret['refund_total']:,.2f}")
-                st.dataframe(ret["preview_df"], use_container_width=True)           
+                  
         else:
             st.info("Wähle Einstellungen und klicke **KPIs berechnen**.")
 
