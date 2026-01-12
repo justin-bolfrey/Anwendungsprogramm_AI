@@ -1,5 +1,5 @@
 """
-Dieses Modul enthält alle Funktionen für Deskriptive Analyse & EDA.
+Dieses Modul enthält alle Funktionen für EDA.
 """
 
 from __future__ import annotations

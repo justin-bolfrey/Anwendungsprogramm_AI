@@ -341,7 +341,7 @@ with tab_eda:
 
                 monthly["umsatz_roll"] = (
                     monthly.set_index("monat")["umsatz"]
-                    .rolling(window=roll_window)
+                    .rolling(window=3)
                     .mean()
                     .values
                 )
