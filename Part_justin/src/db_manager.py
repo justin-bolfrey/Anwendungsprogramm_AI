@@ -208,7 +208,7 @@ def get_top_products(limit=10, country=None):
       AND TRIM(p.description) <> ''
       AND LENGTH(TRIM(p.description)) >= 5
       AND LOWER(TRIM(p.description)) NOT IN (
-          'damages','damaged','missing','manual','dotcom','check','?','none'
+          'damages','damaged','missing','manual','dotcom','check','?','none', 'found', 'smashed', '???missing'
       )
     """
 
