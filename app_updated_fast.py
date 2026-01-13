@@ -300,14 +300,6 @@ with tab_eda:
             run_eda = st.form_submit_button("EDA berechnen")
 
         if run_eda:
-            # KPI-Quick-Row
-            kpis = cached_dashboard_kpis(country=country)
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Umsatz", f"{kpis['revenue']:,.0f}")
-            c2.metric("Bestellungen", f"{kpis['orders']:,.0f}")
-            c3.metric("Kunden", f"{kpis['customers']:,.0f}")
-            c4.metric("Ø Wert", f"{kpis['aov']:,.2f}")
-
             st.divider()
 
             # Wochenumsatz
