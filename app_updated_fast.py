@@ -83,15 +83,6 @@ def db_ready() -> bool:
     """True, wenn die SQLite DB-Datei existiert."""
     return DB_FILE.exists()
 
-
-def ensure_uploaded_excel(uploaded_file) -> Path:
-    """Speichert Upload unter dem erwarteten Namen."""
-    target = RAW_DIR / "online_retail_II.xlsx"
-    with open(target, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    return target
-
-
 def safe_run(cmd: list[str]) -> tuple[bool, str]:
     """Startet ein Script per subprocess und gibt (ok, output) zurück."""
     try:
@@ -228,13 +219,6 @@ with tab_import:
     col_a, col_b = st.columns([2, 1], vertical_alignment="top")
 
     with col_a:
-        # key gesetzt, damit Streamlit garantiert keine Duplicate-IDs meldet
-        up = st.file_uploader(
-            "online_retail_II.xlsx hochladen",
-            type=["xlsx"],
-            key="import_uploader",
-        )
-
         st.write("### Status")
         if db_ready():
             st.success("DB gefunden ✅")
@@ -250,16 +234,10 @@ with tab_import:
                 )
 
         st.write("### Pipeline ausführen")
-        st.caption("Ablauf: Upload → raw/online_retail_II.xlsx → 01_excel_to_csv.py → 02_init_db.py")
+        st.caption("Ablauf: 01_excel_to_csv.py → 02_init_db.py")
 
-        # Upload speichern (nur, wenn wirklich hochgeladen wurde)
-        if up is not None:
-            saved = ensure_uploaded_excel(up)
-            st.success(f"Upload gespeichert: {saved}")
-
-        # Pipeline bewusst nur auf Button-Klick starten (wichtig wegen Streamlit-Reruns)
-        if st.button("🚀 Pipeline starten", disabled=(up is None), key="btn_pipeline"):
-            st.cache_data.clear()  # nach Neuaufbau Cache leeren
+        if st.button("🚀 Pipeline starten", key="btn_pipeline"):
+            st.cache_data.clear()
             st.info("Starte Schritt 1: Excel → CSV …")
             ok1, out1 = safe_run(["python", str(PIPELINE_EXCEL)])
             st.code(out1 or "(keine Ausgabe)")
@@ -273,6 +251,7 @@ with tab_import:
                     st.success("✅ Import abgeschlossen! DB ist bereit.")
                 else:
                     st.error("Schritt 2 fehlgeschlagen oder DB wurde nicht erstellt.")
+
 
 
 with tab_eda:
@@ -561,4 +540,3 @@ with tab_db:
                 df = pd.read_sql(f"SELECT * FROM {t} LIMIT 50;", conn)
                 conn.close()
                 st.dataframe(df, width="stretch")
-
