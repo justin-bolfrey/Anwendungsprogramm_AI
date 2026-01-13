@@ -437,15 +437,22 @@ with tab_forecast:
     if not db_ready():
         st.warning("Keine DB. Erst Import ausführen.")
     else:
-        # Für Prophet brauchen wir ds/y. Wir holen Wochenumsatz direkt aus SQL (klein + schnell).
-        df_sales = cached_weekly_revenue_sql()
+
+        try:
+            df_sales = db.get_cleaned_prophet_data()
+        except AttributeError:
+
+            df_sales = cached_weekly_revenue_sql()
 
         if df_sales.empty:
-            st.warning("⚠️ Keine Wochenumsatz-Daten verfügbar.")
+            st.warning("⚠️ Keine Daten verfügbar.")
         else:
+
+            df_sales = df_sales.iloc[:-1].copy()
+
             col_info, col_conf = st.columns([1, 2], vertical_alignment="center")
             with col_info:
-                st.info(f"**Datenbasis:** {len(df_sales)} Wochen aggregiert.")
+                st.info(f"**Datenbasis:** {len(df_sales)} Wochen.")
 
             with col_conf:
                 horizon_weeks = st.slider(
@@ -463,70 +470,73 @@ with tab_forecast:
             with st.expander("⚙️ Modell-Parameter (Experten)"):
                 c1, c2 = st.columns(2)
                 with c1:
+
                     season_sel = st.selectbox(
                         "Saisonalität",
-                        ["Multiplikativ (Prozentual)", "Additiv (Absolut)"],
+                        ["Multiplikativ (Empfohlen)", "Additiv"],
                         index=0,
                         key="fc_seasonality",
                     )
+
                     seasonality_mode = "multiplicative" if "Multiplikativ" in season_sel else "additive"
+                
                 with c2:
+
                     cps = st.slider(
                         "Trend-Flexibilität",
-                        0.01, 0.5, 0.05,
+                        0.01, 0.5, 0.15, 
                         help="Höher = Modell reagiert schneller auf Trendbrüche.",
                         key="fc_cps",
                     )
 
             st.divider()
 
-            # Button: Modell läuft nur auf expliziten Klick (sonst nervige Reruns)
             if st.button("🚀 Forecast berechnen", type="primary", key="btn_forecast"):
-                with st.spinner("Modell wird trainiert & validiert ..."):
+                with st.spinner(f"Modell rechnet ({seasonality_mode})..."):
                     try:
                         res = prophet_backtest(
-                            df=df_sales[["ds", "y"]],
+                            df=df_sales,
                             test_weeks=int(test_weeks),
                             horizon_weeks=int(horizon_weeks),
                             week_freq=WEEK_FREQ,
-                            seasonality_mode=seasonality_mode,
+  
+                            seasonality_mode=seasonality_mode, 
                             cps=float(cps),
-                            sps=3.0,
+                            sps=10.0, 
                             yearly=True,
                         )
 
-                        st.success("Berechnung erfolgreich abgeschlossen!")
+                        st.success("Berechnung erfolgreich!")
 
                         kpi1, kpi2, kpi3 = st.columns(3)
                         kpi1.metric("MAPE", f"{res.metrics['MAPE_%']:.1f} %")
                         kpi2.metric("MAE", f"{res.metrics['MAE']:.0f} €")
                         kpi3.metric("RMSE", f"{res.metrics['RMSE']:.0f}")
 
-                        fig, ax = plt.subplots(figsize=(10, 5))
-
-                        ax.plot(res.train_df["ds"], res.train_df["y"], label="Historie (Training)", alpha=0.4)
-                        ax.plot(res.test_df["ds"], res.test_df["y"], label="Realität (Holdout)", linestyle="--", linewidth=2)
-                        ax.plot(res.forecast["ds"], res.forecast["yhat"], label="KI Forecast", linewidth=2)
+                        fig, ax = plt.subplots(figsize=(10, 3))
+                        
+               
+                        ax.plot(res.train_df["ds"], res.train_df["y"], label="Historie", alpha=0.4, color="#333333")
+                        ax.plot(res.test_df["ds"], res.test_df["y"], label="Realität", linestyle="--", linewidth=2, color="#d62728")
+                        ax.plot(res.forecast["ds"], res.forecast["yhat"], label=f"Forecast ({seasonality_mode})", linewidth=2, color="#1f77b4")
+                        
                         ax.fill_between(
                             res.forecast["ds"],
                             res.forecast["yhat_lower"],
                             res.forecast["yhat_upper"],
-                            alpha=0.15,
-                            label="80% Konfidenz",
+                            alpha=0.15, label="Konfidenz", color="#1f77b4"
                         )
-
-                        ax.set_title(f"Sales Forecast ({seasonality_mode})", fontsize=12)
-                        ax.set_ylabel("Umsatz (€)")
-                        ax.legend(loc="upper left")
-                        ax.grid(True, alpha=0.2)
-
+                        
+                        ax.set_title(f"Sales Forecast - Modus: {seasonality_mode}", fontsize=10)
+                        ax.legend(loc="upper left", fontsize="small")
                         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=10))
                         ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-
+                        ax.grid(True, alpha=0.2)
+                        
                         st.pyplot(fig)
 
                     except Exception as e:
-                        st.error(f"Fehler bei der Modell-Berechnung: {e}")
+                        st.error(f"Fehler bei der Berechnung: {e}")
 
 
 with tab_db:

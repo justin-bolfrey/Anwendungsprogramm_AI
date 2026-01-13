@@ -367,6 +367,45 @@ def get_weekly_revenue(start_date=None, end_date=None, country=None):
         df["y"] = df["y"].astype(float)
     return df
 
+# --- NEUE FUNKTION FÜR PROPHET ---
+def get_cleaned_prophet_data():
+    """
+    Holt bereinigte Wochendaten für Prophet.
+    FILTERT 'SCHMUTZ' RAUS: 
+    - Entfernt Porto (POST), Bankgebühren, Manuelle Buchungen via StockCode-Filter.
+    - Entfernt 0-Umsatz Wochen.
+    """
+    conn = get_connection()
+    
+    # Wir schließen explizit Service-Codes aus, die den Waren-Umsatz verzerren
+    query = """
+    SELECT
+        date(s.invoice_date, 'weekday 0') AS ds,
+        SUM(s.quantity * s.price) AS y
+    FROM sales s
+    JOIN products p ON s.stock_code = p.stock_code
+    WHERE s.quantity > 0 
+      AND s.price > 0
+      -- Filter für 'Non-Product' Codes (Porto, Gebühren, Test, Manual)
+      AND s.stock_code NOT IN ('POST', 'DOT', 'M', 'BANK CHARGES', 'D', 'CRUK')
+      -- Filter für sehr kurze Beschreibungen (oft Fehler)
+      AND LENGTH(p.description) > 3
+    GROUP BY date(s.invoice_date, 'weekday 0')
+    ORDER BY ds
+    """
+    
+    df = pd.read_sql(query, conn)
+    conn.close()
+    
+    if not df.empty:
+        df["ds"] = pd.to_datetime(df["ds"])
+        df["y"] = df["y"].astype(float)
+        
+        # Leere Wochen / Fehlerhafte 0-Werte entfernen
+        df = df[df['y'] > 10]
+        
+    return df
+
 
 
 # ==========================================
