@@ -1,9 +1,3 @@
-"""model_prophet.py 
----------------- 
-Prophet Forecast + Holdout Backtest (weekly) 
-Standard-Version: Flexibel (Additiv/Multiplikativ) & Robust
-""" 
-
 from __future__ import annotations 
 
 from dataclasses import dataclass 
@@ -38,9 +32,6 @@ def mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100.0) 
 
 def remove_outliers(df: pd.DataFrame, lower_q=0.01, upper_q=0.99) -> pd.DataFrame:
-    """
-    Standard-Bereinigung: Entfernt nur die extremsten 1% Ausreißer (Datenfehler).
-    """
     df_clean = df.copy()
     q_low = df_clean['y'].quantile(lower_q)
     q_high = df_clean['y'].quantile(upper_q)
@@ -75,16 +66,16 @@ def fit_forecast_weekly(
         seasonality_mode=seasonality_mode, 
         changepoint_prior_scale=changepoint_prior_scale, 
         seasonality_prior_scale=seasonality_prior_scale, 
-        yearly_seasonality=False, # Wir fügen es unten manuell hinzu (HD)
+        yearly_seasonality=False, 
         weekly_seasonality=False, 
         daily_seasonality=False, 
     ) 
 
-    # High-Res Saisonalität (hilft trotzdem, den Peak zu treffen)
+    # High-Res Saisonalität
     if yearly_seasonality:
         m.add_seasonality(name='yearly', period=365.25, fourier_order=15)
 
-    # Feiertage sind immer gut
+    # Feiertage 
     if country_holidays:
         try:
             m.add_country_holidays(country_name=country_holidays)

@@ -2,24 +2,19 @@ import sqlite3
 import pandas as pd
 import os
 
-# Pfad zur Datenbank (dynamisch, damit es bei jedem im Team funktioniert)
+# Pfad zur Datenbank
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, '..', 'database', 'enterprise_data.db')
 
 def get_connection():
-    """Hilfsfunktion: Erstellt Verbindung zur DB"""
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"Datenbank nicht gefunden unter: {DB_PATH}. Bitte erst Pipeline ausführen!")
     return sqlite3.connect(DB_PATH)
 
 def get_sales_data(start_date=None, end_date=None, country=None):
-    """
-    Holt Verkaufsdaten gefiltert nach Datum und Land.
-    Perfekt für das Dashboard (Teammitglied 2).
-    """
     conn = get_connection()
     
-    # Basis-Query mit JOINs (Das Stern-Schema zahlt sich aus!)
+    # Basis-Query mit JOINs 
     query = """
     SELECT 
         s.invoice_date,
@@ -50,17 +45,13 @@ def get_sales_data(start_date=None, end_date=None, country=None):
     df = pd.read_sql(query, conn, params=params)
     conn.close()
     
-    # Datum in datetime umwandeln (sicher ist sicher)
+    # Datum in datetime umwandeln 
     if not df.empty:
         df['invoice_date'] = pd.to_datetime(df['invoice_date'])
         
     return df
 
 def get_data_for_prophet(product_name):
-    """
-    Holt Daten speziell für die KI-Vorhersage (Tobi).
-    Format: Datum (ds) und Umsatz (y)
-    """
     conn = get_connection()
     
     query = """
@@ -78,20 +69,18 @@ def get_data_for_prophet(product_name):
     df = pd.read_sql(query, conn, params=(product_name,))
     conn.close()
     
-    # Wichtig für Prophet: Datentypen
+
     df['ds'] = pd.to_datetime(df['ds'])
     
     return df
 # All Products
 def get_all_products():
-    """Für die Dropdown-Liste im Dashboard"""
     conn = get_connection()
     df = pd.read_sql("SELECT DISTINCT description FROM products ORDER BY description", conn)
     conn.close()
     return df['description'].tolist()
 # All Countries
 def get_all_countries():
-    """Für die Dropdown-Liste im Dashboard"""
     conn = get_connection()
     df = pd.read_sql("SELECT DISTINCT country FROM customers ORDER BY country", conn)
     conn.close()
@@ -99,7 +88,6 @@ def get_all_countries():
 
 # All Customers
 def get_all_customers():
-    """Für die Dropdown-Liste im Dashboard"""
     conn = get_connection()
     df = pd.read_sql("SELECT DISTINCT customer_id FROM customers ORDER BY customer_id", conn)
     conn.close()
@@ -107,7 +95,6 @@ def get_all_customers():
 
 # All Invoices
 def get_all_invoices():
-    """Für die Dropdown-Liste im Dashboard"""
     conn = get_connection()
     df = pd.read_sql("SELECT DISTINCT invoice FROM sales ORDER BY invoice", conn)
     conn.close()
@@ -117,10 +104,6 @@ def get_all_invoices():
 
 # 1. KPIs für die Scorecard oben im Dashboard
 def get_dashboard_kpis(start_date=None, end_date=None, country=None):
-    """
-    Berechnet die wichtigsten Kennzahlen für die Scorecard ganz oben.
-    Gibt ein Dictionary zurück, kein DataFrame!
-    """
     conn = get_connection()
     
     # Basis-Query
@@ -137,7 +120,6 @@ def get_dashboard_kpis(start_date=None, end_date=None, country=None):
     
     params = []
     
-    # Dynamische Filter (DRY - Don't Repeat Yourself: Das könnte man in eine Helper-Funktion auslagern)
     if start_date:
         query += " AND s.invoice_date >= ?"
         params.append(start_date)
@@ -153,7 +135,6 @@ def get_dashboard_kpis(start_date=None, end_date=None, country=None):
     row = cursor.fetchone()
     conn.close()
     
-    # Wir geben ein einfaches Dictionary zurück, das ist leichter für Streamlit
     return {
         "revenue": row[0] or 0,
         "orders": row[1] or 0,
@@ -191,7 +172,7 @@ def get_monthly_revenue(year=None, country=None):
     return df
 
 
-# 3. Top Produkte (Was verkauft sich am besten?)
+# 3. Top Produkte 
 def get_top_products(limit=10, country=None):
     conn = get_connection()
 
@@ -232,7 +213,7 @@ def get_top_products(limit=10, country=None):
 
 
 
-# 4. Hourly Sales (Wann kaufen die Leute? Morgens oder Abends?)
+# 4. Hourly Sales 
 def get_hourly_activity(country=None):
     conn = get_connection()
 
@@ -258,9 +239,6 @@ def get_hourly_activity(country=None):
     return df
 
 def get_cancellations(limit=100, country=None):
-    """
-    Zeigt Stornos an (quantity < 0), optional gefiltert nach Land.
-    """
     conn = get_connection()
 
     query = """
@@ -295,9 +273,6 @@ def get_cancellations(limit=100, country=None):
 
 
 def get_top_countries_by_revenue(top_n=10):
-    """
-    Holt die umsatzstärksten Länder für das Balkendiagramm.
-    """
     conn = get_connection()
     query = """
     SELECT 
@@ -335,13 +310,10 @@ def get_db_status():
    
 
 def get_weekly_revenue(start_date=None, end_date=None, country=None):
-    """
-    Sehr schnelle Wochen-Zeitreihe (ds,y) direkt aus SQL.
-    """
     conn = get_connection()
     query = """
     SELECT
-        date(s.invoice_date, 'weekday 0') AS ds,   -- Wochenendtag (Sonntag) als Bucket
+        date(s.invoice_date, 'weekday 0') AS ds,   
         SUM(s.quantity * s.price) AS y
     FROM sales s
     JOIN customers c ON s.customer_id = c.customer_id
@@ -369,15 +341,8 @@ def get_weekly_revenue(start_date=None, end_date=None, country=None):
 
 # --- NEUE FUNKTION FÜR PROPHET ---
 def get_cleaned_prophet_data():
-    """
-    Holt bereinigte Wochendaten für Prophet.
-    FILTERT 'SCHMUTZ' RAUS: 
-    - Entfernt Porto (POST), Bankgebühren, Manuelle Buchungen via StockCode-Filter.
-    - Entfernt 0-Umsatz Wochen.
-    """
     conn = get_connection()
     
-    # Wir schließen explizit Service-Codes aus, die den Waren-Umsatz verzerren
     query = """
     SELECT
         date(s.invoice_date, 'weekday 0') AS ds,
@@ -386,9 +351,7 @@ def get_cleaned_prophet_data():
     JOIN products p ON s.stock_code = p.stock_code
     WHERE s.quantity > 0 
       AND s.price > 0
-      -- Filter für 'Non-Product' Codes (Porto, Gebühren, Test, Manual)
       AND s.stock_code NOT IN ('POST', 'DOT', 'M', 'BANK CHARGES', 'D', 'CRUK')
-      -- Filter für sehr kurze Beschreibungen (oft Fehler)
       AND LENGTH(p.description) > 3
     GROUP BY date(s.invoice_date, 'weekday 0')
     ORDER BY ds
@@ -401,16 +364,15 @@ def get_cleaned_prophet_data():
         df["ds"] = pd.to_datetime(df["ds"])
         df["y"] = df["y"].astype(float)
         
-        # Leere Wochen / Fehlerhafte 0-Werte entfernen
         df = df[df['y'] > 10]
         
     return df
 
 
 
-# ==========================================
-# SYSTEM-CHECK (ENTRY POINT)
-# ==========================================
+
+# SYSTEM-CHECK 
+
 if __name__ == "__main__":
     # Einstellungen für schönere Ausgabe im Terminal
     pd.set_option('display.max_columns', None)
@@ -418,7 +380,7 @@ if __name__ == "__main__":
     
     print("\n STARTE SYSTEM-CHECK (Deine Version)...\n")
 
-    # --- BLOCK 1: Deine Basis-Funktionen ---
+    # --- BLOCK 1: Die Basis-Funktionen ---
     print("--- 1. Basis-Listen (Deine Funktionen) ---")
     
     try:
@@ -434,9 +396,8 @@ if __name__ == "__main__":
     except Exception as e: print(f"❌ Fehler bei get_all_countries: {e}")
 
     try:
-        # Test: get_all_invoices (DEINE NEUE FUNKTION)
+        # Test: get_all_invoices 
         invoices = get_all_invoices()
-        # Hinweis: Je nachdem ob du eine Liste oder DF zurückgibst, passen wir die Ausgabe an
         count = len(invoices) if isinstance(invoices, list) else len(invoices)
         print(f"✅ Invoices: {count} Rechnungen gefunden.")
     except NameError:
@@ -444,7 +405,7 @@ if __name__ == "__main__":
     except Exception as e: print(f"❌ Fehler bei get_all_invoices: {e}")
 
     try:
-        # Test: get_all_customers (DEINE NEUE FUNKTION)
+        # Test: get_all_customers 
         custs = get_all_customers()
         count_c = len(custs) if isinstance(custs, list) else len(custs)
         print(f"✅ Customers: {count_c} Kunden gefunden.")

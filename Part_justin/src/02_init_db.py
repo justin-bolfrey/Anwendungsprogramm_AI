@@ -17,7 +17,6 @@ def init_database():
     for f in CSV_FILES:
         path = os.path.join(CSV_DIR, f)
         print(f"   Lese CSV: {f}...")
-        # low_memory=False unterdrückt Warnungen bei gemischten Datentypen
         df = pd.read_csv(path, low_memory=False)
         dfs.append(df)
         
@@ -39,7 +38,7 @@ def init_database():
     # Duplikate entfernen 
     # df_all = df_all.drop_duplicates() 
 
-    # 3. Modellierung (Star Schema)
+    # 3. Modellierung
     
     # --- Dimension: Customers ---
     print("    Baue Tabelle: customers")
@@ -55,7 +54,6 @@ def init_database():
     
     # --- Fakten: Sales ---
     print("    Baue Tabelle: sales")
-    # Wir speichern nur IDs und Fakten
     df_sales = df_all[['Invoice', 'StockCode', 'Quantity', 'InvoiceDate', 'Price', 'Customer ID']]
     df_sales.columns = ['invoice', 'stock_code', 'quantity', 'invoice_date', 'price', 'customer_id']
 
@@ -65,12 +63,11 @@ def init_database():
     
     conn = sqlite3.connect(DB_PATH)
     
-    # if_exists='replace' sorgt dafür, dass wir immer bei 0 anfangen (keine doppelten Daten bei Neustart)
     df_customers.to_sql('customers', conn, if_exists='replace', index=False)
     df_products.to_sql('products', conn, if_exists='replace', index=False)
     df_sales.to_sql('sales', conn, if_exists='replace', index=False)
     
-    # Indizes für Performance (Das ist der Turbo für deine App!)
+    # Indizes für Performance 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(invoice_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_cust ON sales(customer_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_prod ON sales(stock_code)")

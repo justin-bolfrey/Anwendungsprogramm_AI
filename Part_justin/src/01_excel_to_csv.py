@@ -13,7 +13,7 @@ def convert_excel():
     
     excel_path = os.path.join(RAW_DIR, EXCEL_FILE)
     
-    # Sicherstellen, dass Ausgabeordner existiert
+
     os.makedirs(PROCESSED_DIR, exist_ok=True)
     
     # Mapping: Excel-Sheet-Name -> Gewünschter CSV-Name
@@ -25,7 +25,7 @@ def convert_excel():
     for sheet_name, csv_name in sheets.items():
         print(f"   Lese Sheet '{sheet_name}'...")
         try:
-            # engine='openpyxl' ist Standard für xlsx
+         
             df = pd.read_excel(excel_path, sheet_name=sheet_name, engine='openpyxl')
             
             output_path = os.path.join(PROCESSED_DIR, csv_name)

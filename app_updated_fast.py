@@ -1,20 +1,3 @@
-"""
-app_updated_fast.py
--------------------
-
-📈 Online Retail II – Analytics & Forecast Dashboard
-
-Ziel dieser Streamlit-App:
-- Ein vollständiges Mini-Dashboard (Import → Analyse → KPIs → Forecast → DB-Preview)
-- Klare UI-Flows (Forms/Buttons), damit nicht bei jeder kleinen Interaktion alles neu läuft
-
-Wichtig (Performance & UX):
-- Keine großen Row-Level-Loads ohne Filter (wo möglich aggregiert aus SQL laden)
-- Aggregationen direkt in SQL (kleine Resultsets)
-- Caching (st.cache_data) für wiederkehrende DB-Abfragen
-- Forms + "Berechnen"-Buttons, damit Slider/Selectbox nicht ständig alles neu rechnen
-"""
-
 from __future__ import annotations
 
 import os
@@ -28,10 +11,10 @@ import matplotlib.dates as mdates
 import streamlit as st
 
 
-# -----------------------------
-# PFAD-FIX (wichtig für Imports)
-# -----------------------------
-# Sorgt dafür, dass Python Projekt-Module findet (z. B. wenn VS Code Ordner "weiß" anzeigt).
+
+# PFAD-FIX 
+
+# Dass Python Projekt-Module findet 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
@@ -41,9 +24,9 @@ from Part_tobi import eda_analysis as eda
 from Part_Krisztian.model_prophet import backtest_holdout as prophet_backtest
 
 
-# -----------------------------
+
 # Streamlit Config
-# -----------------------------
+
 st.set_page_config(
     page_title="Online Retail II – Analytics & Forecast Dashboard",
     layout="wide",
@@ -66,9 +49,9 @@ DEFAULT_HORIZON_WEEKS = 26
 DEFAULT_TEST_WEEKS = 12
 
 
-# -----------------------------
+
 # Navigation (Tabs statt Sidebar)
-# -----------------------------
+
 st.write("# 📈 Online Retail II – Analytics & Forecast Dashboard")
 
 tab_import, tab_eda, tab_kpis, tab_forecast, tab_db = st.tabs(
@@ -76,9 +59,9 @@ tab_import, tab_eda, tab_kpis, tab_forecast, tab_db = st.tabs(
 )
 
 
-# -----------------------------
-# Helpers (fast + cached)
-# -----------------------------
+
+# Helpers 
+
 def db_ready() -> bool:
     """True, wenn die SQLite DB-Datei existiert."""
     return DB_FILE.exists()
@@ -140,10 +123,6 @@ def cached_dashboard_kpis(start_date=None, end_date=None, country=None) -> dict:
 
 @st.cache_data(ttl=300)
 def cached_monthly_revenue(year=None, country=None) -> pd.DataFrame:
-    """
-    Monatsumsatz aus der DB-Schicht (robust, unabhängig von Team-Versionen im EDA-Modul).
-    Erwartete Spalten: monat (YYYY-MM), umsatz
-    """
     if not db_ready():
         return pd.DataFrame()
     return db.get_monthly_revenue(year=year, country=country)
@@ -172,10 +151,6 @@ def cached_hourly_activity(country=None) -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def cached_weekly_revenue_sql(start_date=None, end_date=None, country=None) -> pd.DataFrame:
-    """
-    Wochenumsatz direkt in SQL aggregieren (schnell, kleines Resultset).
-    Output: ds (datetime), y (float)
-    """
     if not db_ready():
         return pd.DataFrame(columns=["ds", "y"])
 
@@ -210,9 +185,9 @@ def cached_weekly_revenue_sql(start_date=None, end_date=None, country=None) -> p
     return df
 
 
-# -----------------------------
+
 # Pages
-# -----------------------------
+
 with tab_import:
     st.write("## Import: Excel → CSV → SQLite")
 
@@ -260,7 +235,6 @@ with tab_eda:
     if not db_ready():
         st.warning("Keine DB. Erst Import ausführen.")
     else:
-        # Form: verhindert, dass jede Widget-Änderung sofort alles neu berechnet
         with st.form("eda_form"):
             countries = cached_countries()
             country_choice = st.selectbox(
@@ -291,7 +265,7 @@ with tab_eda:
                 st.write("Deskriptive Statistik (Wochenumsatz)")
                 st.dataframe(ts[["y"]].describe().T, width="stretch")
 
-                # Rolling Average (Logik aus EDA-Modul)
+                # Rolling Average 
                 ts_roll = eda.rolling_average(ts[["ds", "y"]], window=roll_window)
                 st.write("### Glättung (Rolling Average)")
                 st.line_chart(ts_roll.set_index("ds")[["y", "y_roll"]])
@@ -306,7 +280,6 @@ with tab_eda:
                 st.info("Keine Monatsdaten verfügbar.")
             else:
                 monthly = monthly.copy()
-                # Monat in echtes Datum umwandeln (für Chart)
                 monthly["monat"] = pd.to_datetime(monthly["monat"] + "-01")
                 monthly = monthly.sort_values("monat")
 
@@ -329,7 +302,6 @@ with tab_eda:
             if weekday.empty:
                 st.info("Keine Daten für Wochentage.")
             else:
-                # optional: deutsche Labels
                 mapping = {
                     "Monday": "Mo", "Tuesday": "Di", "Wednesday": "Mi",
                     "Thursday": "Do", "Friday": "Fr", "Saturday": "Sa", "Sunday": "So",
@@ -343,7 +315,7 @@ with tab_eda:
                 st.bar_chart(w.set_index("weekday")["revenue"])
                 st.dataframe(weekday, width="stretch")
 
-            # Optionaler Detailblock
+
             with st.expander("Retouren/Stornos – Preview"):
                 ret = eda.returns_summary(limit_preview=50)
                 st.metric("Anzahl Retouren (Preview)", ret["count_returns"])

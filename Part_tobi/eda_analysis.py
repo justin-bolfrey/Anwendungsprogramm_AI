@@ -10,7 +10,7 @@ from Part_justin.src import db_manager as db
 
 
 
-# 1) Basis: Daten holen (Wrapper)
+# 1) Basis: Daten holen 
 
 def load_sales(start_date: str | None = None,
                end_date: str | None = None,
@@ -38,11 +38,6 @@ def monthly_revenue(year=None, country=None):
 
 
 def rolling_average(ts: pd.DataFrame, window: int = 4) -> pd.DataFrame:
-    """
-    Fügt einer Zeitreihe (ds,y) einen gleitenden Durchschnitt hinzu.
-    Erwartet Spalten: ds, y
-    Gibt zurück: ds, y, y_roll
-    """
     if ts.empty:
         return ts
     out = ts.copy()
@@ -53,12 +48,6 @@ def rolling_average(ts: pd.DataFrame, window: int = 4) -> pd.DataFrame:
 def weekday_profile(start_date: str | None = None,
                     end_date: str | None = None,
                     country: str | None = None) -> pd.DataFrame:
-    """
-    Umsatz nach Wochentag (Mo-So).
-    Ergebnis-Spalten:
-    - weekday (Montag, Dienstag, ...)
-    - revenue (Umsatz)
-    """
     df = load_sales(start_date, end_date, country)
     if df.empty:
         return df
@@ -81,15 +70,6 @@ def weekday_profile(start_date: str | None = None,
 # 3) Retouren / Stornos:
 
 def returns_summary(limit_preview: int = 100) -> dict:
-    """
-    Zusammenfassung über Stornos/Retouren.
-    Nutzt db.get_cancellations() als Datenquelle.
-
-    Rückgabe:
-    - count_returns
-    - refund_total (negativ oder Betrag)
-    - preview_df (die letzten N Retouren)
-    """
     canc = db.get_cancellations(limit=limit_preview)
     if canc.empty:
         return {"count_returns": 0, "refund_total": 0.0, "preview_df": canc}
